@@ -6,7 +6,7 @@ import android.os.IBinder;
 import android.os.RemoteCallbackList;
 import android.os.RemoteException;
 
-import com.primitive.natives.helper.Logger;
+import com.universal.robot.core.helper.Logger;
 
 public class ImageCalculatorService extends Service
 {
@@ -69,7 +69,7 @@ public class ImageCalculatorService extends Service
 		}
 
 		@Override
-		public void command_enroll(int operation) throws RemoteException {
+		public void command_enroll() throws RemoteException {
 			final long started = Logger.start();
 			Logger.end(started);
 		}

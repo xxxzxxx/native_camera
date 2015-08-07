@@ -9,8 +9,16 @@ import android.os.Build;
 import android.view.Surface;
 import android.view.WindowManager;
 
+import com.universal.robot.core.helper.Logger;
+
 public class RotationHelper
 {
+	public static void setCameraDisplayOrientation(final Context context, final int cameraId,
+			final android.hardware.Camera camera)
+	{
+		camera.setDisplayOrientation(RotationHelper.getCameraDisplayOrientation(context));
+	}
+
 	@SuppressLint("NewApi")
 	/**
 	 * isPhoneMode

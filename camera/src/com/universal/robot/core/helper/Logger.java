@@ -1,4 +1,4 @@
-package com.primitive.natives.helper;
+package com.universal.robot.core.helper;
 
 import java.math.BigInteger;
 import java.security.Principal;
@@ -9,11 +9,11 @@ import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
 
-import com.primitive.natives.camera.BuildConfig;
-
 import android.hardware.Camera;
 import android.os.Debug;
 import android.util.Log;
+
+import com.primitive.natives.camera.BuildConfig;
 
 /**
  * Logger

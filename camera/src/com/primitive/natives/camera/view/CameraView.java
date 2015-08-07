@@ -4,68 +4,82 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import com.primitive.natives.helper.CameraOptimaizerHelper;
-import com.primitive.natives.helper.Logger;
-import com.primitive.natives.helper.RotationHelper;
-
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.ImageFormat;
 import android.hardware.Camera;
 import android.hardware.Camera.CameraInfo;
 import android.hardware.Camera.Size;
+import android.os.Handler;
 import android.util.AttributeSet;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
 
+import com.primitive.natives.helper.CameraOptimaizerHelper;
+import com.primitive.natives.helper.RotationHelper;
+import com.primitive.natives.thread.AwaitInvoker;
+import com.universal.robot.core.CaptureFrame;
+import com.universal.robot.core.helper.Logger;
+
 public class CameraView extends SurfaceView implements SurfaceHolder.Callback, Camera.PreviewCallback
 {
+	enum PreviewGAMode
+	{
+		QVGA /* 320*240 */
+		, VGA /* 640*480 */
+		, SVGA /* 800*600 */
+		, XGA /* 1024*768 */
+	};
+
 	public interface TakePreviewPictureListner
 	{
-		public void take_frames(CameraView sender, Camera.Size previewSize, byte[][] buffers);
+		public boolean takePicture();
+		public int takePictureCount();
+		public void onTakePreview(Object sender, CaptureFrame[] frames);
 	}
 
 	private TakePreviewPictureListner takePreviewPictureListner = null;
 
-	public void setTakePreviewPictureListner(TakePreviewPictureListner listner)
+	public void setTakePreviewPictureListner(final TakePreviewPictureListner listner)
 	{
 		this.takePreviewPictureListner = listner;
 	}
 
 	private Camera camera;
 	private SurfaceHolder holder;
-	public boolean takePicture = false;
 	private Camera.Size previewSize = null;
 	private int previewFormat = 0;
 
+	/**  */
+	private int previewParamMax = 640;
+	/**  */
+	private int previewParamMin = 480;
+
 	public Camera.Size getPreviewSize()
 	{
-		return previewSize;
+		return this.previewSize;
 	}
 
-	public CameraView(Context context)
+	public CameraView(final Context context)
 	{
 		super(context);
 		final long started = Logger.start();
-		commonInitilize();
+		this.commonInitilize();
 		Logger.end(started);
 	}
 
-	public CameraView(Context context, AttributeSet attrs, int defStyle) {
+	public CameraView(final Context context, final AttributeSet attrs, final int defStyle) {
 		super(context, attrs, defStyle);
 		final long started = Logger.start();
-		commonInitilize();
+		this.commonInitilize();
 		Logger.end(started);
 	}
 
-	public CameraView(Context context, AttributeSet attrs) {
+	public CameraView(final Context context, final AttributeSet attrs) {
 		super(context, attrs);
 		final long started = Logger.start();
-		commonInitilize();
+		this.commonInitilize();
 		Logger.end(started);
 	}
 
@@ -78,77 +92,102 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback, C
 		Logger.end(started);
 	}
 
-	private List<byte[]> buffers = Collections.synchronizedList(new ArrayList<byte[]>());
+	private List<CaptureFrame> buffers = Collections.synchronizedList(new ArrayList<CaptureFrame>());
 
-	public void onPreviewFrame(byte[] data, Camera camera)
+	@Override
+	public void onPreviewFrame(final byte[] data, final Camera camera)
 	{
-		synchronized (this)
+		Logger.debug("data.size:[%d]", data.length);
+		if (this.takePreviewPictureListner == null)
 		{
-			if (takePicture && takePreviewPictureListner != null)
+		}
+		else if (!this.takePreviewPictureListner.takePicture())
+		{
+		}
+		else
+		{
+			if (this.buffers.size() >= this.takePreviewPictureListner.takePictureCount())
 			{
-				byte[] bytes = new byte[data.length];
-				System.arraycopy(data, 0, bytes, 0, data.length);
-
-				if (this.buffers.size() >= 5)
-				{
-					this.buffers = Collections.synchronizedList(new ArrayList<byte[]>());
-				}
-
-				List<byte[]> buffers = this.buffers;
-				buffers.add(bytes);
-				if (this.buffers.size() >= 5)
-				{
-					byte[][] arrays = (byte[][]) buffers.toArray(new byte[0][0]);
-
-					Logger.debug("arrays:%d", arrays.length);
-
-					/*
-					int i = 0;
-					for (byte[] b : arrays)
-					{
-						Logger.debug("arrays[%d]:%d",i,b.length);
-						i++;
-					}
-					*/
-					if (takePreviewPictureListner != null)
-					{
-						takePreviewPictureListner.take_frames(
-								CameraView.this
-								, CameraView.this.previewSize
-								, arrays
-								);
-					}
-				}
+				this.buffers = Collections.synchronizedList(new ArrayList<CaptureFrame>());
 			}
+
+			final byte[] copy = new byte[data.length];
+			System.arraycopy(data, 0, copy, 0, data.length);
+			this.buffers.add(new CaptureFrame(CameraView.this.previewFormat,CameraView.this.previewSize,data));
+
+			final List<CaptureFrame> buffers = this.buffers;
+			Handler handler = new Handler();
+			Runnable runner = new Runnable()
+			{
+				@Override
+				public void run()
+				{
+					if (buffers.size() >= CameraView.this.takePreviewPictureListner.takePictureCount())
+					{
+						final CaptureFrame[] arrays = buffers.toArray(new CaptureFrame[0]);
+						Runnable runner = new Runnable()
+						{
+							@Override
+							public void run()
+							{
+								try
+								{
+									if (CameraView.this.takePreviewPictureListner != null)
+									{
+										CameraView.this.takePreviewPictureListner.onTakePreview(
+												CameraView.this
+												, arrays
+												);
+									}
+								}
+								catch (Throwable ex)
+								{
+									Logger.err(ex);
+								}
+							}
+						};
+						runner.run();
+					}
+				}
+			};
+			AwaitInvoker invoke = new AwaitInvoker();
+			invoke.invokeAndWait(handler,runner);
+			invoke.run();
 		}
 	}
 
 	@SuppressLint("NewApi")
 	@Override
-	public void surfaceCreated(SurfaceHolder holder)
+	public void surfaceCreated(final SurfaceHolder holder)
 	{
 		final long started = Logger.start();
 		try
 		{
 			this.camera = Camera.open(CameraInfo.CAMERA_FACING_FRONT);
 
-			Camera.Parameters parameters = this.camera.getParameters();
+			final Camera.Parameters parameters = this.camera.getParameters();
+
+			final int fpsMinIndex = Camera.Parameters.PREVIEW_FPS_MIN_INDEX;
+			final int fpsMaxIndex = Camera.Parameters.PREVIEW_FPS_MAX_INDEX;
 
 			int fpsMin = 0;
 			int fpsMax = 0;
-			for (int n = 0; n < parameters.getSupportedPreviewFpsRange().size(); ++n) {
-				if (fpsMin < parameters.getSupportedPreviewFpsRange().get(n)[0]) {
-					fpsMin = parameters.getSupportedPreviewFpsRange().get(n)[0];
-					fpsMax = parameters.getSupportedPreviewFpsRange().get(n)[1];
+
+			for (int[] renge : parameters.getSupportedPreviewFpsRange())
+			{
+				if (fpsMin < renge[fpsMinIndex]) {
+					fpsMin = renge[fpsMinIndex];
+					fpsMax = renge[fpsMaxIndex];
 				}
 			}
+
 			Logger.debug("fpsMin:[%d] fpsMax:[%d]", fpsMin, fpsMax);
 			parameters.setPreviewFpsRange(fpsMin, fpsMax);
 
 			parameters.setWhiteBalance("fluorescent");
 
 			this.camera.setPreviewDisplay(this.holder);
-		} catch (Throwable ex)
+		} catch (final Throwable ex)
 		{
 			Logger.err(ex);
 			if (this.camera != null)
@@ -164,7 +203,7 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback, C
 	}
 
 	@Override
-	public void surfaceDestroyed(SurfaceHolder holder)
+	public void surfaceDestroyed(final SurfaceHolder holder)
 	{
 		final long started = Logger.start();
 		this.camera.stopPreview();
@@ -175,24 +214,24 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback, C
 	}
 
 	@Override
-	public void surfaceChanged(SurfaceHolder holder, int format, int width, int height)
+	public void surfaceChanged(final SurfaceHolder holder, final int format, final int width, final int height)
 	{
 		final long started = Logger.start();
 		if (this.camera != null)
 		{
 			this.camera.stopPreview();
 
-			CameraView.setCameraDisplayOrientation(getContext(), 0, this.camera);
+			RotationHelper.setCameraDisplayOrientation(this.getContext(), 0, this.camera);
 
-			Camera.Parameters parameters = this.camera.getParameters();
+			final Camera.Parameters parameters = this.camera.getParameters();
 
 			final List<Camera.Size> pictureSizes = parameters.getSupportedPictureSizes();
 
-			previewFormat = CameraOptimaizerHelper.getOptimalPreviewFormat(parameters);
+			this.previewFormat = CameraOptimaizerHelper.getOptimalPreviewFormat(parameters);
 
-			if (previewFormat != 0)
+			if (this.previewFormat != 0)
 			{
-				parameters.setPreviewFormat(previewFormat);
+				parameters.setPreviewFormat(this.previewFormat);
 			}
 			else
 			{
@@ -201,18 +240,18 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback, C
 
 			final Size pictureSize = CameraOptimaizerHelper.getOptimalPictureSize(pictureSizes);
 
-			int preview_width = (pictureSize.width > pictureSize.height ? 640 : 480);
-			int preview_height = (pictureSize.width > pictureSize.height ? 480 : 640);
+			final int preview_width = (pictureSize.width > pictureSize.height ? previewParamMax : previewParamMin);
+			final int preview_height = (pictureSize.width > pictureSize.height ? previewParamMin : previewParamMax);
 
-			previewSize = camera.new Size(preview_width, preview_height);
+			this.previewSize = this.camera.new Size(preview_width, preview_height);
 
-			parameters.setPreviewSize(previewSize.width, previewSize.height);
+			parameters.setPreviewSize(this.previewSize.width, this.previewSize.height);
 
-			final ViewGroup.LayoutParams layoutParams = getLayoutParams();
-			final double preview_raito = (double) previewSize.width / (double) previewSize.height;
+			final ViewGroup.LayoutParams layoutParams = this.getLayoutParams();
+
+			final double preview_raito = (double) this.previewSize.width / (double) this.previewSize.height;
 			if (width > height)
 			{
-				// 横長
 				final int new_height = (int) (width / preview_raito);
 				if (new_height <= height)
 				{
@@ -226,7 +265,6 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback, C
 			}
 			else
 			{
-				// 縦長
 				final int new_width = (int) (height / preview_raito);
 				if (new_width <= width)
 				{
@@ -237,116 +275,26 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback, C
 					layoutParams.height = (int) (width * preview_raito);
 				}
 			}
-			setLayoutParams(layoutParams);
+			Logger.debug("layoutParams.width:[%d].height:[%d]",layoutParams.width,layoutParams.height);
+			this.setLayoutParams(layoutParams);
 			this.camera.setParameters(parameters);
-			int imgformat = parameters.getPreviewFormat();
-			int bitsperpixel = ImageFormat.getBitsPerPixel(imgformat);
-			Camera.Size camerasize = parameters.getPreviewSize();
-			int frame_size = ((camerasize.width * camerasize.height) * bitsperpixel) / 8;
+			final int imgformat = parameters.getPreviewFormat();
 
-			byte[] callbackBuffer = new byte[frame_size];
-			camera.setPreviewCallback(this);
-			camera.addCallbackBuffer(callbackBuffer);
+			final int bitsperpixel = ImageFormat.getBitsPerPixel(imgformat);
+			final Camera.Size camerasize = parameters.getPreviewSize();
+			final int frame_size = ((camerasize.width * camerasize.height) * bitsperpixel);
+			final int frame_buffer_size = frame_size / 8;
+
+			Logger.debug("bitsperpixel:[%d]",bitsperpixel);
+			Logger.debug("camerasize.width:[%d] height:[%d] ",camerasize.width,camerasize.height);
+			Logger.debug("frame_size:[%d]",frame_size);
+			Logger.debug("frame_buffer_size:[%d]",frame_buffer_size);
+
+			final byte[] callbackBuffer = new byte[frame_buffer_size];
+			this.camera.setPreviewCallback(this);
+			this.camera.addCallbackBuffer(callbackBuffer);
 			this.camera.startPreview();
 		}
 		Logger.end(started);
 	}
-
-	public static void setCameraDisplayOrientation(Context context, int cameraId, android.hardware.Camera camera)
-	{
-		camera.setDisplayOrientation(RotationHelper.getCameraDisplayOrientation(context));
-	}
-
-	public static void makeRotateImage(Context context, byte[] data, int maxPixel)
-	{
-		final long started = Logger.start();
-		// オリジナルのBMP
-		Bitmap bitmapSrc = CameraView.makeTargetPixelImage(data, maxPixel);
-
-		// 回転角を取り出す
-		int degree = RotationHelper.getCameraDisplayOrientation(context);
-		int destWidth = 0;
-		int destHeight = 0;
-
-		// 反転、もしくはそのままの場合
-		if (degree % 180 == 0) {
-			destWidth = bitmapSrc.getWidth();
-			destHeight = bitmapSrc.getHeight();
-		} else {
-			destWidth = bitmapSrc.getHeight();
-			destHeight = bitmapSrc.getWidth();
-		}
-
-		// 新しくBitmapを作る
-		Bitmap bitmapDest = Bitmap.createBitmap(destWidth, destHeight, Bitmap.Config.ARGB_8888);
-
-		// キャンバスを作る
-		Canvas canvas = new Canvas(bitmapDest);
-		canvas.save();
-
-		// キャンバスを使ってBMPを回転やら移動やらさせてデバイスの回転に合わせた画像を作る
-		canvas.rotate(degree, destWidth / 2, destHeight / 2);
-		int offset = (destHeight - destWidth) / 2 * ((degree - 180) % 180) / 90;
-		canvas.translate(offset, -offset);
-		canvas.drawBitmap(bitmapSrc, 0, 0, null);
-		canvas.restore();
-		bitmapSrc.recycle();
-		bitmapSrc = null;
-		Logger.end(started);
-	}
-
-	/**
-	 * 指定されたピクセル内に収まるようなBMPイメージを作る
-	 * @param data
-	 * @param maxPixel
-	 * @return
-	 */
-	private static Bitmap makeTargetPixelImage(byte[] data, int maxPixel)
-	{
-		final long started = Logger.start();
-		try
-		{
-			BitmapFactory.Options option = new BitmapFactory.Options();
-			int samplingSize = 0;
-
-			// 作成する予定のBMPの情報を取り出す
-			option.inJustDecodeBounds = true; // 情報のみ取り出す
-			option.inSampleSize = 0; // 等角
-
-			// 情報だけ取り出す
-			option.inJustDecodeBounds = true;
-			BitmapFactory.decodeByteArray(data, 0, data.length, option);
-
-			// 指定されたピクセル数より多いBMPの場合は小さくする
-			if (maxPixel < option.outWidth * option.outHeight) {
-
-				// オーバーしてしまっている分を計算
-				double overPixel = (double) (option.outWidth * option.outHeight) / maxPixel;
-				samplingSize = (int) (Math.sqrt(overPixel) + 1);
-
-				// 指定されたサイズより下のものだった
-			}
-			else
-			{
-				// 等角で。
-				samplingSize = 1;
-			}
-
-			// 実際の画像を読み込む
-			//
-
-			// データまで読み込み
-			option.inJustDecodeBounds = false;
-
-			// サンプリング係数
-			option.inSampleSize = samplingSize;
-
-			// 指定サイズの画像を作る
-			return BitmapFactory.decodeByteArray(data, 0, data.length, option);
-		} finally
-		{
-			Logger.end(started);
-		}
-	}
-
 }

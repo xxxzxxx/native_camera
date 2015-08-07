@@ -1,4 +1,4 @@
-package com.primitive.natives.primitive;
+package com.primitive.natives.model;
 
 
 /**

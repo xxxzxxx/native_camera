@@ -6,6 +6,8 @@ import android.graphics.ImageFormat;
 import android.hardware.Camera;
 import android.hardware.Camera.Size;
 
+import com.universal.robot.core.helper.Logger;
+
 public class CameraOptimaizerHelper {
 
 	/**

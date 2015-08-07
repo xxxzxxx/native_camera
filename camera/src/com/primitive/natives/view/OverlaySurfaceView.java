@@ -8,7 +8,7 @@ import android.util.AttributeSet;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
-import com.primitive.natives.helper.Logger;
+import com.universal.robot.core.helper.Logger;
 
 public abstract class OverlaySurfaceView extends SurfaceView implements SurfaceHolder.Callback
 {
